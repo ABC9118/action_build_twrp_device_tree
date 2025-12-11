@@ -1,0 +1,52 @@
+name: Make TWRP Device
+on:
+  workflow_dispatch:
+    inputs:
+      IMG_URL:
+        description: 'IMG_URL'
+        required: true
+        default: ''
+
+jobs:
+  build:
+    if: github.event.repository.owner.id == github.event.sender.id
+    runs-on: ubuntu-latest  # 统一用最新版Ubuntu，避免版本不匹配
+    steps:
+      - name: Check Out
+        uses: actions/checkout@main
+
+      - name: Prepare the environment
+        run: |
+          sudo apt update -y
+          # 仅保留Python3相关包，新增aria2依赖，补充twrpdtgen潜在依赖
+          sudo apt install -y python3 python3-pip cpio wget aria2 liblzma-dev
+          # 升级pip并安装twrpdtgen，避免版本兼容问题
+          python3 -m pip install --upgrade pip
+          pip3 install twrpdtgen
+          mkdir -p dt  # 确保目录创建成功
+
+      - name: Download boot or recovery img
+        run: |
+          # 增加下载失败重试，指定输出目录
+          aria2c -x 16 -s 16 "${{ github.event.inputs.IMG_URL }}" -d ./
+          ls -la  # 查看下载文件，方便排错
+
+      - name: Start build
+        run: |
+          # 确保img文件匹配，遍历当前目录img文件
+          python3 -m twrpdtgen -o dt/ $(find . -maxdepth 1 -name "*.img" | head -n1)
+
+      - name: ZIP device tree
+        run: |
+          zip -r DeviceTree.zip ./dt
+          ls -la DeviceTree.zip  # 验证压缩包生成
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./DeviceTree.zip
+          name: TWRP_Device_Tree-${{ github.run_id }}
+          tag_name: ${{ github.run_id }}
+          body: DeviceTree for twrp (auto-built)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
